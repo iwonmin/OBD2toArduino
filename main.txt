@@ -1,0 +1,271 @@
+#include "main.h"
+
+long unsigned int rxId;
+unsigned char len = 0;
+unsigned char rxBuf[8];
+uint32_t count;
+volatile States state;
+LiquidCrystal_I2C lcd(0x27,20,4);
+MCP_CAN CAN(8);
+outputs RPM(CAN_RPM), COOLTEMP(CAN_COOLTEMP), TORQ(CAN_TORQ), SPEED(CAN_SPEED), THRO(CAN_THRO), BATT(CAN_BATT), WARN(CAN_WARN), UPTIME(CAN_UPTIME), EOILTEMP(CAN_EOILTEMP), FUELRATE(CAN_FUELRATE), LOAD(CAN_LOAD);
+
+
+void setup() {
+  state = States::INIT;
+  CAN.init_Mask(0, 0, 0x07000000);              // Init first mask...
+  CAN.init_Mask(1, 0, 0x07000000);              // Init second mask...
+  for (uint8_t i = 0; i < 6; ++i) {
+    CAN.init_Filt(i, 0, 0x07000000);           //Init filters
+  }
+  CAN.setMode(MCP_NORMAL);   // Set operation mode to normal so the MCP2515 sends acks to received data.
+                  
+  Timer1.initialize(40000);
+  Timer1.attachInterrupt(counter);
+  attachInterrupt(digitalPinToInterrupt(3), nextstate, FALLING);
+  lcd.init();
+  lcd.backlight();
+  lcd.setCursor(0,0);
+  pinMode(3, INPUT_PULLUP);
+  pinMode(1, OUTPUT);
+  pinMode(CAN_INT, INPUT);
+}
+//interrupt로 버튼 누르면 state Main-max-uptime 중에서 바꾸기 2,3,4상태 constrain??
+void loop() {
+  switch(state) {
+    case States::INIT:
+    boot();
+    break;
+
+    case States::ERROR:
+    error();
+    break;
+
+    case States::MAIN:
+    mainscreen();
+    switch(count%25) {
+      case 0: sendCAN(CAN_RPM); break;
+      case 1: receiveCAN(CAN_RPM); break;
+      case 2: sendCAN(CAN_COOLTEMP); break;
+      case 3: receiveCAN(CAN_COOLTEMP); break;
+      case 4: sendCAN(CAN_TORQ); break;
+      case 5: receiveCAN(CAN_TORQ); break;
+      case 6: sendCAN(CAN_SPEED); break;
+      case 7: receiveCAN(CAN_SPEED); break;
+      case 8: sendCAN(CAN_LOAD); break;
+      case 9: receiveCAN(CAN_LOAD); break;
+      case 10: sendCAN(CAN_THRO); break;
+      case 11: receiveCAN(CAN_THRO); break;
+      case 12: sendCAN(CAN_FUELRATE); break;
+      case 13: receiveCAN(CAN_FUELRATE); break;
+    }
+
+    if(RPM.viewcurrent()>3000 || COOLTEMP.viewcurrent()>120) {
+      tone(1,261,500);
+    }
+    break;
+
+    case States::MAX:
+    maxscreen();
+    break;
+
+    case States::TIME:
+    timescreen();
+    break;
+  }
+}
+void boot() {
+  if(state != States::INIT) return;
+
+  if (CAN.begin(MCP_STDEXT, CAN_500KBPS, MCP_8MHZ) == CAN_OK) { 
+    state = States::MAIN;
+  }
+  else {
+    state = States::ERROR;
+  }
+}
+void error() {
+  lcd.setCursor(0,0);
+  lcd.print("CAN Connection Error");
+  lcd.setCursor(0,2);
+  lcd.print("Reboot in");
+  lcd.setCursor(12,2);
+  lcd.print("Seconds.");
+  for(int i=5; i>0; i--) {
+    lcd.setCursor(10,2);
+    lcd.print(i);
+    delay(1000);
+  }
+  lcd.clear();
+  //state = States::INIT;
+  state = MAIN;
+  }
+  void mainscreen() {
+    lcd.setCursor(0,0);
+    lcd.print("RPM:");
+    lcd.print(RPM.viewcurrent());
+    lcd.setCursor(8,0);
+    lcd.print("rpm");
+    lcd.setCursor(12,0);
+    lcd.print("T:");
+    lcd.print(COOLTEMP.viewcurrent());
+    lcd.setCursor(17,0);
+    lcd.print("C");
+    lcd.setCursor(0,1);
+    lcd.print("Torq:");
+    lcd.print(TORQ.viewcurrent());
+    lcd.setCursor(9,1);
+    lcd.print("Nm");
+    lcd.setCursor(12,1);
+    lcd.print("V:");
+    lcd.print(SPEED.viewcurrent());
+    lcd.setCursor(17,1);
+    lcd.print("kph");
+    lcd.setCursor(0,2);
+    lcd.print("LOAD:");
+    lcd.print(LOAD.viewcurrent());
+    lcd.setCursor(8,2);
+    lcd.print("%");
+    lcd.setCursor(11,2);
+    lcd.print("Thro:");
+    lcd.print(THRO.viewcurrent());
+    lcd.setCursor(19,2);
+    lcd.print("%");
+    lcd.setCursor(0,3);
+    lcd.print("Fuel:");
+    lcd.print(FUELRATE.viewcurrent());
+    lcd.setCursor(9,3);
+    lcd.print("L/h");
+  }
+void maxscreen() {
+    lcd.setCursor(0,0);
+    lcd.print("RPM:");
+    lcd.print(RPM.viewmax());
+    lcd.setCursor(8,0);
+    lcd.print("rpm");
+    lcd.setCursor(12,0);
+    lcd.print("T:");
+    lcd.print(COOLTEMP.viewmax());
+    lcd.setCursor(17,0);
+    lcd.print("C");
+    lcd.setCursor(0,1);
+    lcd.print("Torq:");
+    lcd.print(TORQ.viewmax());
+    lcd.setCursor(9,1);
+    lcd.print("Nm");
+    lcd.setCursor(12,1);
+    lcd.print("V:");
+    lcd.print(SPEED.viewmax());
+    lcd.setCursor(17,1);
+    lcd.print("kph");
+    lcd.setCursor(0,2);
+    lcd.print("LOAD:");
+    lcd.print(LOAD.viewmax());
+    lcd.setCursor(8,2);
+    lcd.print("%");
+    lcd.setCursor(11,2);
+    lcd.print("Thro:");
+    lcd.print(THRO.viewmax());
+    lcd.setCursor(19,2);
+    lcd.print("%");
+    lcd.setCursor(0,3);
+    lcd.print("Fuel:");
+    lcd.print(FUELRATE.viewmax());
+    lcd.setCursor(9,3);
+    lcd.print("L/h");
+}
+void timescreen() {
+    lcd.setCursor(0,0);
+    lcd.print("System Uptime:");
+    lcd.setCursor(0,1);
+    lcd.print(millis());
+    lcd.setCursor(0,2);
+    lcd.print("Engine Uptime:");
+    lcd.setCursor(0,3);
+    lcd.print(UPTIME.viewcurrent());
+}
+void nextstate() {
+  if(state == INIT || state == ERROR) {
+    return;
+  }
+  delay(200);
+  //lcd.clear();
+  if(state == TIME) {
+    state = MAIN;
+  }
+  else {
+    state = state + 1;
+  }
+}
+void counter() {
+  count++;
+}
+void sendCAN(unsigned char __pid) {
+  unsigned char tmp[8] = {0x02, 0x01, __pid, 0, 0, 0, 0, 0};
+
+  CAN.sendMsgBuf(CAN_ID_PID, 0, 8, tmp);
+}
+
+uint32_t receiveCAN(unsigned char __pid) {
+  uint32_t output=0;
+    if (!digitalRead(CAN_INT)) {                      // If CAN0_INT pin is low, read receive buffer
+    CAN.readMsgBuf(&rxId, &len, rxBuf);     // Read data: len = data length, buf = data byte(s)
+    }
+
+    switch (__pid) {
+      case CAN_COOLTEMP:
+        if(rxBuf[2] == CAN_COOLTEMP){
+          output = rxBuf[3] - 40;
+          COOLTEMP.refresh(output);
+        }
+      break;
+      case CAN_RPM:
+        if(rxBuf[2] == CAN_RPM){
+          output = ((256 * rxBuf[3]) + rxBuf[4]) / 4;
+          RPM.refresh(output);
+        }
+      break;
+      case CAN_TORQ:
+        if(rxBuf[2] == CAN_TORQ){
+          output = ((256 * rxBuf[3]) + rxBuf[4]);
+          TORQ.refresh(output);
+        }
+      break;
+      case CAN_SPEED:
+        if(rxBuf[2] == CAN_SPEED){
+          output = rxBuf[3];
+          SPEED.refresh(output);
+        }
+      break;
+      case CAN_THRO:
+        if(rxBuf[2] == CAN_THRO){
+          output = 100 * rxBuf[3] / 255;
+          THRO.refresh(output);
+        }
+      break;
+      case CAN_UPTIME:
+        if(rxBuf[2] == CAN_UPTIME){
+          output = ((256 * rxBuf[3]) + rxBuf[4]);
+          UPTIME.refresh(output);
+        }
+      break;
+       case CAN_EOILTEMP:
+        if(rxBuf[2] == CAN_EOILTEMP){
+          output = rxBuf[3] - 40;
+          EOILTEMP.refresh(output);
+        }
+      break;
+      case CAN_FUELRATE:
+        if(rxBuf[2] == CAN_FUELRATE){
+          output = ((256 * rxBuf[3]) + rxBuf[4]) / 20;
+          FUELRATE.refresh(output);
+        }
+      break;
+      case CAN_LOAD:
+        if(rxBuf[2] == CAN_LOAD){
+          output = 100 * rxBuf[3] / 255;
+          LOAD.refresh(output);
+        }
+      break;
+    }    
+    return output;
+}
